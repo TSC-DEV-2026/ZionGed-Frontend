@@ -214,7 +214,7 @@ export default function CreateDocument() {
                   />
                 </FormRow>
 
-                <FormRow label="Owner">
+                <FormRow label="Proprietário">
                   <input
                     type="text"
                     value={owner}
