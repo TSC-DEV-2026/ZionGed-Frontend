@@ -8,6 +8,7 @@ import SearchInput, {
 } from "@/components/search-input";
 import Footer from "@/components/footer";
 import SideMenu from "@/components/side-menu";
+import { useUser } from "@/contexts/UserContext";
 import {
   Download,
   Loader2,
@@ -37,19 +38,12 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
-/**
- * Paginação em blocos deslizantes:
- * Ex: 1 2 3 ...
- * Clicou 3 -> 3 4 5 ...
- * Nunca mostra a última página após os "..."
- */
 function buildPageList(current: number, total: number) {
   if (total <= 0) return [];
 
   const pages: (number | "...")[] = [];
-
   const start = clamp(current, 1, total);
-  const end = Math.min(total, start + 2); // bloco de 3
+  const end = Math.min(total, start + 2);
 
   for (let p = start; p <= end; p++) pages.push(p);
 
@@ -59,6 +53,9 @@ function buildPageList(current: number, total: number) {
 }
 
 export default function Home() {
+  const { user } = useUser();
+  const navigate = useNavigate();
+
   const [results, setResults] = useState<DocumentRecord[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | number | null>(
@@ -66,79 +63,52 @@ export default function Home() {
   );
 
   const [filters, setFilters] = useState<SearchFilters | null>(null);
-
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const navigate = useNavigate();
-
-  const getTagValue = (doc: DocumentRecord, chave: string) =>
-    doc.tags.find((t) => t.chave === chave)?.valor ?? "";
-
-  // ✅ agora é Proprietário (compatível com legado "Owner")
-  const getProprietario = (doc: DocumentRecord) =>
-    getTagValue(doc, "proprietario") || getTagValue(doc, "Owner");
+  const pessoaId = user?.pessoa?.id ?? null;
 
   const formatDate = (iso: string) => {
     if (!iso) return "";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleDateString("pt-BR");
-  };
-
-  const formatCompetenciaDisplay = (raw: string) => {
-    const v = (raw ?? "").trim();
-    if (!v) return "";
-
-    const m1 = v.match(/^(\d{4})-(\d{2})$/);
-    if (m1) return `${m1[2]}${m1[1]}`;
-
-    const m2 = v.match(/^(\d{2})\/(\d{4})$/);
-    if (m2) return `${m2[1]}${m2[2]}`;
-
-    const digits = v.replace(/\D/g, "");
-    if (digits.length === 6) {
-      const a = parseInt(digits.slice(0, 2), 10);
-      const b = parseInt(digits.slice(2, 4), 10);
-      if (a >= 1 && a <= 12) return digits;
-      if (b >= 1 && b <= 12)
-        return `${digits.slice(4, 6)}${digits.slice(0, 4)}`;
-    }
-
-    return v;
-  };
-
-  const getCompetenciaDisplay = (doc: DocumentRecord) => {
-    const raw = getTagValue(doc, "competencia");
-    const formatted = formatCompetenciaDisplay(raw);
-    return formatted || "—";
+    const datePart = iso.slice(0, 10);
+    const [year, month, day] = datePart.split("-");
+    if (!year || !month || !day) return datePart;
+    return `${day}-${month}-${year}`;
   };
 
   const fetchDocuments = useCallback(
     async (f: SearchFilters, p: number, ps: number) => {
+      if (!pessoaId) {
+        toast.error("Não foi possível identificar o usuário.");
+        setResults([]);
+        setMeta(null);
+        return;
+      }
+
       setIsSearching(true);
+
       try {
         const params: Record<string, any> = {
           page: p,
           page_size: ps,
+          cliente_id: pessoaId,
+          user_id: pessoaId,
         };
 
         if (f.q) params.q = f.q;
         if (f.tag_chave) params.tag_chave = f.tag_chave;
         if (f.tag_valor) params.tag_valor = f.tag_valor;
-        if (f.cliente_id != null) params.cliente_id = f.cliente_id;
 
         const res = await api.get<DocumentoSearchResponse>("/documents/search", {
           params,
         });
 
         setResults(res.data.items ?? []);
-        setMeta(res.data.meta);
-
+        setMeta(res.data.meta ?? null);
         setFilters(f);
-        setPage(res.data.meta.page);
-        setPageSize(res.data.meta.page_size);
+        setPage(res.data.meta?.page ?? 1);
+        setPageSize(res.data.meta?.page_size ?? ps);
       } catch (err) {
         console.error("Erro ao buscar documentos", err);
         toast.error("Não foi possível buscar documentos. Tente novamente.");
@@ -148,7 +118,7 @@ export default function Home() {
         setIsSearching(false);
       }
     },
-    []
+    [pessoaId]
   );
 
   const handleSearch = useCallback(
@@ -218,18 +188,10 @@ export default function Home() {
   };
 
   const handleDelete = (doc: DocumentRecord) => {
-    const tipo =
-      getTagValue(doc, "tipo de documento") ||
-      getTagValue(doc, "tipo") ||
-      "Documento";
-
-    const proprietario = getProprietario(doc);
     const created = formatDate(doc.criado_em);
 
     toast(`Deseja realmente excluir este documento?`, {
-      description: proprietario
-        ? `${tipo} (Proprietário: ${proprietario}) criado em ${created}.`
-        : `${tipo} criado em ${created}.`,
+      description: `${doc.filename || "Documento"} criado em ${created}.`,
       action: {
         label: "Excluir",
         onClick: () => deleteDocument(doc),
@@ -254,7 +216,7 @@ export default function Home() {
     <div className="w-full min-h-screen bg-white flex flex-col">
       <Header />
 
-      <div className="">
+      <div>
         <SideMenu topClass="top-20" />
       </div>
 
@@ -305,16 +267,7 @@ export default function Home() {
                   <thead className="bg-slate-50 border-b">
                     <tr>
                       <th className="text-left px-6 py-3 font-semibold text-slate-700">
-                        Tipo de documento
-                      </th>
-                      <th className="text-left px-6 py-3 font-semibold text-slate-700">
-                        Competência
-                      </th>
-                      <th className="text-left px-6 py-3 font-semibold text-slate-700">
-                        CPF
-                      </th>
-                      <th className="text-left px-6 py-3 font-semibold text-slate-700">
-                        Proprietário
+                        Nome do arquivo
                       </th>
                       <th className="text-left px-6 py-3 font-semibold text-slate-700">
                         Data de criação
@@ -327,25 +280,13 @@ export default function Home() {
                   <tbody>
                     {results.map((doc) => {
                       const isThisDownloading = downloadingId === doc.id;
+
                       return (
                         <tr
                           key={doc.id}
                           className="border-t hover:bg-slate-50/60"
                         >
-                          <td className="px-6 py-3">
-                            {getTagValue(doc, "tipo de documento") ||
-                              getTagValue(doc, "tipo") ||
-                              "—"}
-                          </td>
-                          <td className="px-6 py-3">
-                            {getCompetenciaDisplay(doc)}
-                          </td>
-                          <td className="px-6 py-3">
-                            {getTagValue(doc, "cpf") || "—"}
-                          </td>
-                          <td className="px-6 py-3">
-                            {getProprietario(doc) || "—"}
-                          </td>
+                          <td className="px-6 py-3">{doc.filename || "—"}</td>
                           <td className="px-6 py-3">
                             {formatDate(doc.criado_em)}
                           </td>
@@ -399,11 +340,11 @@ export default function Home() {
               {meta && (
                 <div className="px-4 sm:px-6 py-4 border-t">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    {/* LEFT */}
                     <div className="flex items-center justify-between gap-3 sm:justify-start">
-                      <div className="flex items-center gap-2 ">
+                      <div className="flex items-center gap-2">
                         {[5, 10, 20].map((n) => {
                           const active = pageSize === n;
+
                           return (
                             <button
                               key={n}
@@ -433,7 +374,6 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {/* RIGHT */}
                     <div className="flex items-center justify-between gap-3">
                       <button
                         type="button"
@@ -446,19 +386,21 @@ export default function Home() {
 
                       {showPagination && (
                         <div className="flex-1 overflow-x-auto">
-                          <div className="flex items-center gap-1 min-w-max px-1 ">
+                          <div className="flex items-center gap-1 min-w-max px-1">
                             {pageList.map((p, idx) => {
                               if (p === "...") {
                                 return (
                                   <span
                                     key={`dots-${idx}`}
-                                    className="px-2 text-slate-400 "
+                                    className="px-2 text-slate-400"
                                   >
                                     ...
                                   </span>
                                 );
                               }
+
                               const active = p === page;
+
                               return (
                                 <button
                                   key={p}
@@ -493,7 +435,6 @@ export default function Home() {
                       </button>
                     </div>
 
-                    {/* META desktop */}
                     <div className="hidden lg:block text-sm text-slate-500">
                       Página <b className="text-slate-700">{meta.page}</b> de{" "}
                       <b className="text-slate-700">{meta.total_pages}</b> (

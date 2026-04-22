@@ -1,5 +1,4 @@
-// src/pages/document-edit/page.tsx
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Header from "@/components/header";
 import Footer from "@/components/footer";
@@ -14,33 +13,159 @@ type LocationState = {
   doc?: DocumentRecord;
 };
 
-function formatCpf(digits: string): string {
-  const onlyDigits = digits.replace(/\D/g, "").slice(0, 11);
+type EditableTag = {
+  id?: number;
+  chave: string;
+  valor: string;
+};
 
-  if (onlyDigits.length <= 3) {
-    return onlyDigits;
-  }
-  if (onlyDigits.length <= 6) {
-    return `${onlyDigits.slice(0, 3)}.${onlyDigits.slice(3)}`;
-  }
-  if (onlyDigits.length <= 9) {
-    return `${onlyDigits.slice(0, 3)}.${onlyDigits.slice(3, 6)}.${onlyDigits.slice(
-      6
-    )}`;
-  }
-  return `${onlyDigits.slice(0, 3)}.${onlyDigits.slice(3, 6)}.${onlyDigits.slice(
-    6,
-    9
-  )}-${onlyDigits.slice(9, 11)}`;
+function onlyDigits(value: string) {
+  return (value ?? "").replace(/\D/g, "");
 }
 
-function formatCompetencia(digits: string): string {
-  const onlyDigits = digits.replace(/\D/g, "").slice(0, 6);
+function formatCpf(value: string) {
+  const digits = onlyDigits(value).slice(0, 11);
 
-  if (onlyDigits.length <= 4) {
-    return onlyDigits;
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+  if (digits.length <= 9) {
+    return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
   }
-  return `${onlyDigits.slice(0, 4)}-${onlyDigits.slice(4)}`;
+
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(
+    6,
+    9
+  )}-${digits.slice(9, 11)}`;
+}
+
+function formatCompetenciaForInput(value: string) {
+  const raw = (value ?? "").trim();
+
+  if (!raw) return "";
+
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const digits = onlyDigits(raw);
+
+  if (digits.length === 6) {
+    const first4 = digits.slice(0, 4);
+    const last2 = digits.slice(4, 6);
+
+    if (Number(first4) >= 1900) {
+      return `${first4}-${last2}`;
+    }
+
+    const mm = digits.slice(0, 2);
+    const yyyy = digits.slice(2, 6);
+    return `${yyyy}-${mm}`;
+  }
+
+  if (digits.length <= 4) return digits;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}`;
+}
+
+function normalizeCompetenciaForSave(value: string) {
+  const raw = (value ?? "").trim();
+
+  if (!raw) return "";
+
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const digits = onlyDigits(raw);
+
+  if (digits.length === 6) {
+    const first4 = digits.slice(0, 4);
+
+    if (Number(first4) >= 1900) {
+      return `${digits.slice(0, 4)}-${digits.slice(4, 6)}`;
+    }
+
+    return `${digits.slice(2, 6)}-${digits.slice(0, 2)}`;
+  }
+
+  return raw;
+}
+
+function formatTagLabel(tag: string) {
+  const raw = (tag ?? "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!raw) return "";
+
+  const acronyms = new Set([
+    "cpf",
+    "cnpj",
+    "id",
+    "rg",
+    "pis",
+    "nsr",
+    "pdf",
+    "xml",
+    "json",
+    "csv",
+    "api",
+    "url",
+    "uuid",
+  ]);
+
+  return raw
+    .split(" ")
+    .map((word) => {
+      const lower = word.toLowerCase();
+
+      if (acronyms.has(lower)) {
+        return lower.toUpperCase();
+      }
+
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(" ");
+}
+
+function isCpfTag(chave: string) {
+  return /\bcpf\b/i.test(chave);
+}
+
+function isCompetenciaTag(chave: string) {
+  return /competenc/i.test(chave);
+}
+
+function isReadonlyTag(chave: string) {
+  const normalized = (chave ?? "")
+    .toLowerCase()
+    .replace(/[_\s]+/g, "");
+
+  return normalized === "regraid";
+}
+
+function getInitialTagValue(chave: string, valor: string) {
+  if (isCpfTag(chave)) {
+    return formatCpf(valor);
+  }
+
+  if (isCompetenciaTag(chave)) {
+    return formatCompetenciaForInput(valor);
+  }
+
+  return valor ?? "";
+}
+
+function normalizeTagValueForSave(chave: string, valor: string) {
+  if (isCpfTag(chave)) {
+    return onlyDigits(valor).slice(0, 11);
+  }
+
+  if (isCompetenciaTag(chave)) {
+    return normalizeCompetenciaForSave(valor);
+  }
+
+  return (valor ?? "").trim();
 }
 
 export default function DocumentEditPage() {
@@ -49,12 +174,8 @@ export default function DocumentEditPage() {
   const { doc } = (location.state as LocationState) || {};
 
   const [isSaving, setIsSaving] = useState(false);
-
   const [filename, setFilename] = useState("");
-  const [tipoDocumento, setTipoDocumento] = useState("");
-  const [cpf, setCpf] = useState("");
-  const [competencia, setCompetencia] = useState("");
-  const [proprietario, setProprietario] = useState("");
+  const [tags, setTags] = useState<EditableTag[]>([]);
 
   useEffect(() => {
     if (!doc) {
@@ -64,49 +185,57 @@ export default function DocumentEditPage() {
 
     setFilename(doc.filename ?? "");
 
-    setTipoDocumento(
-      getTagValue(doc, "tipo de documento") || getTagValue(doc, "tipo")
-    );
+    const dynamicTags: EditableTag[] = (doc.tags ?? []).map((tag) => ({
+      id: tag.id,
+      chave: tag.chave,
+      valor: getInitialTagValue(tag.chave, tag.valor),
+    }));
 
-    const cpfValue = getTagValue(doc, "cpf");
-    setCpf(formatCpf(cpfValue));
-
-    const compValue = getTagValue(doc, "competencia");
-    setCompetencia(formatCompetencia(compValue));
-
-    setProprietario(getTagValue(doc, "proprietario") || getTagValue(doc, "Owner"));
+    setTags(dynamicTags);
   }, [doc]);
 
-  const handleCpfChange = (value: string) => {
-    const digits = value.replace(/\D/g, "").slice(0, 11);
-    setCpf(formatCpf(digits));
-  };
+  const handleTagChange = (index: number, value: string) => {
+    setTags((prev) =>
+      prev.map((tag, currentIndex) => {
+        if (currentIndex !== index) return tag;
+        if (isReadonlyTag(tag.chave)) return tag;
 
-  const handleCompetenciaChange = (value: string) => {
-    const digits = value.replace(/\D/g, "").slice(0, 6);
-    setCompetencia(formatCompetencia(digits));
+        if (isCpfTag(tag.chave)) {
+          return {
+            ...tag,
+            valor: formatCpf(value),
+          };
+        }
+
+        if (isCompetenciaTag(tag.chave)) {
+          return {
+            ...tag,
+            valor: formatCompetenciaForInput(value),
+          };
+        }
+
+        return {
+          ...tag,
+          valor: value,
+        };
+      })
+    );
   };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!doc) return;
 
-    const cpfRaw = cpf.replace(/\D/g, "");
-    const competenciaRaw = competencia.replace(/\D/g, "");
-
-    if (cpfRaw.length !== 11 || competenciaRaw.length !== 6) {
-      toast.error("CPF deve ter 11 dígitos e Competência no formato YYYY-MM.");
-      return;
-    }
+    const normalizedTags = tags
+      .map((tag) => ({
+        chave: tag.chave,
+        valor: normalizeTagValueForSave(tag.chave, tag.valor),
+      }))
+      .filter((tag) => tag.chave.trim() !== "" && tag.valor !== "");
 
     const payload = {
       filename: filename.trim(),
-      tags: [
-        { chave: "tipo", valor: tipoDocumento.trim() },
-        { chave: "cpf", valor: cpfRaw },
-        { chave: "competencia", valor: competenciaRaw },
-        { chave: "proprietario", valor: proprietario.trim() },
-      ].filter((t) => t.valor !== ""),
+      tags: normalizedTags,
     };
 
     try {
@@ -128,9 +257,9 @@ export default function DocumentEditPage() {
     navigate(-1);
   };
 
-  const cpfDigits = cpf.replace(/\D/g, "");
-  const competenciaDigits = competencia.replace(/\D/g, "");
-  const isFormValid = cpfDigits.length === 11 && competenciaDigits.length === 6;
+  const isFormValid = useMemo(() => {
+    return filename.trim() !== "";
+  }, [filename]);
 
   if (!doc) {
     return (
@@ -149,7 +278,7 @@ export default function DocumentEditPage() {
             <Button
               type="button"
               onClick={() => navigate(-1)}
-              className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-full px-5 py-2.5 shadow-sm transition-transform duration-200 hover:-translate-y-0.5 cursor-pointer "
+              className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-full px-5 py-2.5 shadow-sm transition-transform duration-200 hover:-translate-y-0.5 cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
               Voltar
@@ -172,14 +301,13 @@ export default function DocumentEditPage() {
 
       <main className="flex-1 bg-slate-50">
         <section className="w-full max-w-6xl mx-auto px-4 lg:px-6 pt-8 lg:pt-10 pb-12 flex flex-col">
-          {/* topo com botão voltar + info do arquivo */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-            <div className="flex items-center gap-3">
+          <div className="mb-6 sm:mb-8 flex flex-col gap-4">
+            <div className="flex justify-start">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => navigate(-1)}
-                className="flex items-center gap-2  border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-400 shadow-sm cursor-pointer transition-transform duration-200 hover:-translate-y-0.5 mt-10"
+                className="inline-flex items-center gap-2 border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-400 shadow-sm cursor-pointer transition-transform duration-200 hover:-translate-y-0.5 mt-10"
               >
                 <ArrowLeft className="w-4 h-4" />
                 Voltar
@@ -187,7 +315,6 @@ export default function DocumentEditPage() {
             </div>
           </div>
 
-          {/* card principal, no mesmo estilo do card de resultados da Home */}
           <div className="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden transition-transform duration-300 hover:-translate-y-1">
             <div className="px-6 sm:px-10 pt-6 sm:pt-8 pb-4 border-b border-slate-200">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -195,7 +322,7 @@ export default function DocumentEditPage() {
                   Edição de documento
                 </h1>
                 <p className="text-xs sm:text-sm text-slate-600 text-center sm:text-right">
-                  Atualize as informações principais deste arquivo para facilitar a busca e a organização no GED.
+                  Atualize as informações deste arquivo conforme os campos enviados pelo backend.
                 </p>
               </div>
             </div>
@@ -211,58 +338,49 @@ export default function DocumentEditPage() {
                     value={filename}
                     onChange={(e) => setFilename(e.target.value)}
                     className="w-full rounded-xl bg-white border border-slate-300 px-4 py-3 text-sm sm:text-base text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duration-200"
-                    placeholder="holerite_786655_202507.pdf"
+                    placeholder="nome_do_arquivo.pdf"
                   />
                 </FormRow>
 
-                <FormRow label="Tipo de documento">
-                  <input
-                    type="text"
-                    value={tipoDocumento}
-                    onChange={(e) => setTipoDocumento(e.target.value)}
-                    className="w-full rounded-xl bg-white border border-slate-300 px-4 py-3 text-sm sm:text-base text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duration-200"
-                    placeholder="Holerite"
-                  />
-                </FormRow>
+                {tags.map((tag, index) => {
+                  const isCpf = isCpfTag(tag.chave);
+                  const isCompetencia = isCompetenciaTag(tag.chave);
+                  const isReadonly = isReadonlyTag(tag.chave);
 
-                <FormRow label="CPF">
-                  <input
-                    type="text"
-                    value={cpf}
-                    onChange={(e) => handleCpfChange(e.target.value)}
-                    className="w-full rounded-xl bg-white border border-slate-300 px-4 py-3 text-sm sm:text-base text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duração-200"
-                    placeholder="000.000.000-00"
-                    maxLength={14}
-                  />
-                </FormRow>
-
-                <FormRow label="Competência (Ano-Mês)">
-                  <input
-                    type="text"
-                    value={competencia}
-                    onChange={(e) => handleCompetenciaChange(e.target.value)}
-                    className="w-full rounded-xl bg-white border border-slate-300 px-4 py-3 text-sm sm:text-base text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duração-200"
-                    placeholder="2025-07"
-                    maxLength={7}
-                  />
-                </FormRow>
-
-                <FormRow label="Proprietário">
-                  <input
-                    type="text"
-                    value={proprietario}
-                    onChange={(e) => setProprietario(e.target.value)}
-                    className="w-full rounded-xl bg-white border border-slate-300 px-4 py-3 text-sm sm:text-base text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all duração-200"
-                    placeholder="Gustavo Muniz"
-                  />
-                </FormRow>
+                  return (
+                    <FormRow
+                      key={`${tag.chave}-${tag.id ?? index}`}
+                      label={formatTagLabel(tag.chave)}
+                    >
+                      <input
+                        type="text"
+                        value={tag.valor}
+                        onChange={(e) => handleTagChange(index, e.target.value)}
+                        disabled={isReadonly}
+                        className={`w-full rounded-xl border px-4 py-3 text-sm sm:text-base transition-all duration-200 ${
+                          isReadonly
+                            ? "bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed"
+                            : "bg-white border-slate-300 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                        }`}
+                        placeholder={
+                          isCpf
+                            ? "000.000.000-00"
+                            : isCompetencia
+                            ? "YYYY-MM"
+                            : `Informe ${formatTagLabel(tag.chave).toLowerCase()}`
+                        }
+                        maxLength={isCpf ? 14 : isCompetencia ? 7 : undefined}
+                      />
+                    </FormRow>
+                  );
+                })}
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
                 <Button
                   type="submit"
                   disabled={isSaving || !isFormValid}
-                  className="w-full sm:w-56 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full text-sm sm:text-base font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-70 disabled:cursor-not-allowed shadow-sm transition-transform duração-200 hover:-translate-y-0.5 cursor-pointer"
+                  className="w-full sm:w-56 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full text-sm sm:text-base font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-70 disabled:cursor-not-allowed shadow-sm transition-transform duration-200 hover:-translate-y-0.5 cursor-pointer"
                 >
                   {isSaving ? (
                     <>
@@ -279,7 +397,7 @@ export default function DocumentEditPage() {
                   onClick={handleCancel}
                   disabled={isSaving}
                   variant="outline"
-                  className="w-full sm:w-56 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full text-sm sm:text-base font-semibold border-red-500 text-red-600 bg-white hover:bg-red-50 disabled:opacity-70 disabled:cursor-not-allowed shadow-sm transition-transform duração-200 hover:-translate-y-0.5 cursor-pointer"
+                  className="w-full sm:w-56 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full text-sm sm:text-base font-semibold border-red-500 text-red-600 bg-white hover:bg-red-50 disabled:opacity-70 disabled:cursor-not-allowed shadow-sm transition-transform duration-200 hover:-translate-y-0.5 cursor-pointer"
                 >
                   Cancelar ✕
                 </Button>
@@ -303,8 +421,4 @@ function FormRow({ label, children }: { label: string; children: ReactNode }) {
       {children}
     </div>
   );
-}
-
-function getTagValue(doc: DocumentRecord, chave: string): string {
-  return doc.tags.find((t) => t.chave === chave)?.valor ?? "";
 }

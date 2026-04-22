@@ -1,246 +1,175 @@
-// src/contexts/UserContext.tsx
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
-  useRef,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
-import { useNavigate } from "react-router-dom";
-import Cookies from "js-cookie";
 import api, { setAuthFailedHandler } from "@/utils/axiosInstance";
 
-interface EmpresaMatricula {
-  id: string;
+export type Pessoa = {
+  id: number;
   nome: string;
-  matricula: string;
-}
-
-interface User {
-  nome: string;
-  email: string;
-  matricula?: string;
-  gestor: boolean;
   cpf: string;
-  cliente?: string;
-  centro_de_custo?: string;
-  dados?: EmpresaMatricula[];
-  rh?: boolean;
-}
+  telefone: string | null;
+  login_token: string | null;
+};
 
-interface UserContextType {
+export type User = {
+  id: number;
+  email: string;
+  is_active: boolean;
+  last_login_at: string | null;
+  pessoa: Pessoa | null;
+};
+
+type LoginPayload = {
+  email: string;
+  password: string;
+};
+
+type RegisterPayload = {
+  email: string;
+  password: string;
+  nome: string;
+  cpf: string;
+  telefone?: string;
+};
+
+type UserContextType = {
   user: User | null;
+  loading: boolean;
   isAuthenticated: boolean;
-  isLoading: boolean;
+  login: (payload: LoginPayload) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
-}
+};
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
-interface UserProviderProps {
-  children: ReactNode;
+function normalizeMeResponse(data: any): User {
+  return {
+    id: Number(data?.id ?? 0),
+    email: data?.email ?? "",
+    is_active: Boolean(data?.is_active),
+    last_login_at: data?.last_login_at ?? null,
+    pessoa: data?.pessoa
+      ? {
+          id: Number(data.pessoa.id ?? 0),
+          nome: data.pessoa.nome ?? "",
+          cpf: data.pessoa.cpf ?? "",
+          telefone: data.pessoa.telefone ?? null,
+          login_token: data.pessoa.login_token ?? null,
+        }
+      : null,
+  };
 }
 
-const REVALIDATE_ON_FOCUS =
-  (import.meta.env.VITE_AUTH_REVALIDATE_ON_FOCUS ?? "true") === "true";
-const MIN_FOCUS_REVALIDATION_MS = Number(
-  import.meta.env.VITE_AUTH_FOCUS_THROTTLE_MS ?? 300_000
-);
-
-export function UserProvider({ children }: UserProviderProps) {
-  const navigate = useNavigate();
-
+export function UserProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const userRef = useRef<User | null>(null);
-  const [, _setIsAuthenticated] = useState(false);
-  const isAuthRef = useRef(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const didLogout = useRef(false);
+  const [loading, setLoading] = useState(true);
 
-  const inflightRef = useRef<Promise<void> | null>(null);
-  const lastSyncRef = useRef<number>(0);
+  const clearUser = useCallback(() => {
+    setUser(null);
+  }, []);
 
-  const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-
-  const stable = (obj: any): any => {
-    if (Array.isArray(obj)) return obj.map(stable);
-    if (obj && typeof obj === "object") {
-      const sorted: Record<string, any> = {};
-      Object.keys(obj)
-        .sort()
-        .forEach((k) => (sorted[k] = stable(obj[k])));
-      return sorted;
-    }
-    return obj;
-  };
-
-  const eqUser = (a: User | null, b: User | null) =>
-    JSON.stringify(stable(a)) === JSON.stringify(stable(b));
-
-  const assignUserIfChanged = (u: User | null) => {
-    const prev = userRef.current;
-    if (!eqUser(prev, u)) {
-      userRef.current = u;
-      setUser(u);
-    }
-  };
-
-  const setIsAuthenticatedSafe = (next: boolean) => {
-    if (isAuthRef.current !== next) {
-      isAuthRef.current = next;
-      _setIsAuthenticated(next);
-    }
-  };
-
-  const fetchMe = async (opts?: { background?: boolean }) => {
-    const background = !!opts?.background;
-
-    if (!background) setIsLoading(true);
+  const refreshUser = useCallback(async () => {
     try {
-      const res = await api.get("/auth/me");
-
-      const is_sapore = res.data.dados?.[0]?.id == 5849;
-      Cookies.set("is_sapore", is_sapore ? "true" : "false", {
-        sameSite: "lax",
-      });
-
-      if (res.status === 200) {
-        const raw = res.data as any;
-
-        const mapped: User = {
-          ...raw,
-          email: (raw?.email || "").trim(),
-          nome: (raw?.pessoa?.nome || raw?.nome || "").trim(),
-          cpf: (raw?.pessoa?.cpf || raw?.cpf || "").trim(),
-          gestor: raw?.gestor ?? false,
-        };
-
-        assignUserIfChanged(mapped);
-        setIsAuthenticatedSafe(true);
-      } else {
-        assignUserIfChanged(null);
-        setIsAuthenticatedSafe(false);
-      }
-    } catch (err) {
-      assignUserIfChanged(null);
-      setIsAuthenticatedSafe(false);
-    } finally {
-      if (!background) setIsLoading(false);
-      lastSyncRef.current = Date.now();
-      inflightRef.current = null;
+      const response = await api.get("/auth/me");
+      const normalized = normalizeMeResponse(response.data);
+      setUser(normalized);
+    } catch (error) {
+      setUser(null);
+      throw error;
     }
-  };
-
-  const refreshUser = async () => {
-    await fetchMe({ background: false });
-  };
-
-  const logout = async () => {
-    try {
-      Cookies.remove("access_token");
-      Cookies.remove("logged_user");
-      await api.post("/auth/logout");
-    } catch (err) {
-    } finally {
-      setIsAuthenticatedSafe(false);
-      assignUserIfChanged(null);
-      didLogout.current = true;
-      try {
-        localStorage.setItem("auth:changed", String(Date.now()));
-      } catch {}
-      navigate("/", { replace: true });
-    }
-  };
+  }, []);
 
   useEffect(() => {
     setAuthFailedHandler(() => {
-      logout();
+      clearUser();
     });
-  }, [logout]);
 
-  useEffect(() => {
-    if (!didLogout.current) {
-      fetchMe({ background: false });
-    }
-  }, []); // eslint-disable-line
-
-  useEffect(() => {
-    if (!REVALIDATE_ON_FOCUS) return;
-
-    const tryBackgroundSync = () => {
-      const now = Date.now();
-      const elapsed = now - lastSyncRef.current;
-
-      if (elapsed < MIN_FOCUS_REVALIDATION_MS) return;
-      if (inflightRef.current) return;
-
-      inflightRef.current = fetchMe({ background: true });
-    };
-
-    const onFocus = () => tryBackgroundSync();
-    const onVisible = () => {
-      if (document.visibilityState === "visible") tryBackgroundSync();
-    };
-
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisible);
     return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisible);
+      setAuthFailedHandler(() => {});
+    };
+  }, [clearUser]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadUser() {
+      try {
+        const response = await api.get("/auth/me");
+        if (!mounted) return;
+
+        const normalized = normalizeMeResponse(response.data);
+        setUser(normalized);
+      } catch {
+        if (!mounted) return;
+        setUser(null);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadUser();
+
+    return () => {
+      mounted = false;
     };
   }, []);
 
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === "auth:changed") {
-        if (!inflightRef.current) {
-          inflightRef.current = fetchMe({ background: true });
-        }
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+  const login = useCallback(async (payload: LoginPayload) => {
+    await api.post("/auth/login", payload);
+
+    const response = await api.get("/auth/me");
+    const normalized = normalizeMeResponse(response.data);
+    setUser(normalized);
   }, []);
 
-  useEffect(() => {
-    if (!isAuthRef.current) return;
+  const register = useCallback(async (payload: RegisterPayload) => {
+    await api.post("/auth/register", payload);
 
-    const interval = setInterval(async () => {
-      const timestamp = Cookies.get("logged_user");
-      if (!timestamp) return;
-
-      const loggedTime = parseInt(timestamp, 10);
-      if (!Number.isFinite(loggedTime)) return;
-
-      if (Date.now() - loggedTime > thirtyDays) {
-        try {
-          await api.post("/auth/refresh");
-        } catch {
-          await logout();
-        }
-      }
-    }, 60 * 1000);
-
-    return () => clearInterval(interval);
+    const response = await api.get("/auth/me");
+    const normalized = normalizeMeResponse(response.data);
+    setUser(normalized);
   }, []);
 
-  const value: UserContextType = {
-    user,
-    isAuthenticated: isAuthRef.current,
-    isLoading,
-    logout,
-    refreshUser,
-  };
+  const logout = useCallback(async () => {
+    try {
+      await api.post("/auth/logout");
+    } finally {
+      setUser(null);
+    }
+  }, []);
+
+  const value = useMemo<UserContextType>(
+    () => ({
+      user,
+      loading,
+      isAuthenticated: !!user,
+      login,
+      register,
+      logout,
+      refreshUser,
+    }),
+    [user, loading, login, register, logout, refreshUser]
+  );
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
 }
 
 export function useUser() {
   const context = useContext(UserContext);
-  if (context === undefined) {
-    throw new Error("useUser must be used within a UserProvider");
+
+  if (!context) {
+    throw new Error("useUser must be used within UserProvider");
   }
+
   return context;
 }

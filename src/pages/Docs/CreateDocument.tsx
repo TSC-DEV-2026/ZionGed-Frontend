@@ -7,6 +7,7 @@ import SideMenu from "@/components/side-menu";
 import api from "@/utils/axiosInstance";
 import { toast } from "sonner";
 import { ArrowLeft, Loader2, UploadCloud } from "lucide-react";
+import { useUser } from "@/contexts/UserContext";
 import { Button } from "@/components/ui/button";
 
 function formatCpf(digits: string): string {
@@ -47,6 +48,7 @@ export default function CreateDocument() {
   const [owner, setOwner] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const { user } = useUser();
 
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -70,7 +72,7 @@ export default function CreateDocument() {
       setSaving(true);
 
       const meta: any = {
-        cliente_id: clienteId ? Number(clienteId) : undefined,
+        user_id: Number(user?.pessoa?.id || 0),
         tags: [
           { chave: "tipo", valor: tipoDocumento },
           { chave: "cpf", valor: cpfRaw },

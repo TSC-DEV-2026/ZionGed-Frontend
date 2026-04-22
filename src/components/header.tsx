@@ -13,30 +13,46 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { FaUserAlt } from "react-icons/fa";
+import { toast } from "sonner";
 
 export default function Header() {
   const navigate = useNavigate();
-  const { user, isLoading, logout } = useUser();
+  const { user, loading, logout } = useUser();
 
   const displayName = useMemo(() => {
-    const nome = (user?.nome || "").trim();
+    const nome = (user?.pessoa?.nome || "").trim();
     if (nome) return nome;
 
     const email = (user?.email || "").trim();
     if (email) return email.split("@")[0] || "Usuário";
 
     return "Usuário";
-  }, [user?.nome, user?.email]);
+  }, [user?.pessoa?.nome, user?.email]);
 
   const initials = useMemo(() => {
-    const n = (user?.nome || "").trim();
-    if (!n) return "US";
-    const parts = n.split(/\s+/).slice(0, 2);
+    const nome = (user?.pessoa?.nome || "").trim();
+    if (!nome) return "US";
+
+    const parts = nome.split(/\s+/).slice(0, 2);
     return parts.map((p) => (p[0] || "").toUpperCase()).join("") || "US";
-  }, [user?.nome]);
+  }, [user?.pessoa?.nome]);
+
+  const loginToken = user?.pessoa?.login_token || "";
 
   const handleLogout = async () => {
     await logout();
+  };
+
+  const handleCopyToken = async () => {
+    if (!loginToken) return;
+
+    try {
+      await navigator.clipboard.writeText(loginToken);
+      toast.success("Token copiado com sucesso.");
+    } catch (error) {
+      console.error("Erro ao copiar token", error);
+      toast.error("Não foi possível copiar o token.");
+    }
   };
 
   return (
@@ -55,7 +71,7 @@ export default function Header() {
         </div>
 
         <div className="flex items-center gap-3">
-          {isLoading ? null : user ? (
+          {loading ? null : user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -73,13 +89,35 @@ export default function Header() {
                 </Button>
               </DropdownMenuTrigger>
 
-              <DropdownMenuContent align="end" className="min-w-56">
+              <DropdownMenuContent align="end" className="min-w-72">
                 <DropdownMenuLabel className="text-sm">
                   {displayName}
                   <div className="text-xs font-normal text-muted-foreground truncate">
                     {user.email}
                   </div>
                 </DropdownMenuLabel>
+
+                {loginToken ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <div className="px-2 py-2">
+                      <div className="text-xs font-medium text-muted-foreground mb-1">
+                        Token de acesso
+                      </div>
+                      <div className="rounded-md border bg-slate-50 px-2 py-2 text-xs break-all text-slate-700">
+                        {loginToken}
+                      </div>
+                    </div>
+
+                    <DropdownMenuItem
+                      onClick={handleCopyToken}
+                      className="cursor-pointer"
+                    >
+                      Copiar token
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
+
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleLogout}
