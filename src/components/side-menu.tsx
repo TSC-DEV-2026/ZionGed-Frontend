@@ -11,6 +11,7 @@ import {
 import {
   Home,
   FileText,
+  Settings2,
   LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -23,12 +24,22 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { label: "Início", to: "/", icon: <Home className="h-4 w-4" />, exact: true },
+  {
+    label: "Início",
+    to: "/",
+    icon: <Home className="h-4 w-4" />,
+    exact: true,
+  },
   {
     label: "Criar Documentos",
     to: "/documents/create",
     icon: <FileText className="h-4 w-4" />,
-  }
+  },
+  {
+    label: "Regras",
+    to: "/rules",
+    icon: <Settings2 className="h-4 w-4" />,
+  },
 ];
 
 type SideMenuProps = {
@@ -41,7 +52,6 @@ export default function SideMenu({ topClass = "top-24" }: SideMenuProps) {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      {/* Botão flutuante */}
       <SheetTrigger asChild>
         <button
           aria-label="Abrir menu"
@@ -56,13 +66,10 @@ export default function SideMenu({ topClass = "top-24" }: SideMenuProps) {
               : "scale-100 opacity-100"
           )}
         >
-          {/* Anel externo com gradiente verde */}
           <span className="absolute inset-0 rounded-full bg-linear-to-br from-emerald-500 via-emerald-600 to-emerald-700" />
 
-          {/* Círculo interno claro (efeito “glass”) */}
           <span className="absolute inset-0.5 rounded-full bg-white/95 backdrop-blur-sm border border-white/70" />
 
-          {/* Brilho diagonal sutil */}
           <span
             className="
               pointer-events-none absolute -left-1/2 top-0 h-full w-2/3
@@ -74,7 +81,6 @@ export default function SideMenu({ topClass = "top-24" }: SideMenuProps) {
             "
           />
 
-          {/* Ícone em barras */}
           <span className="relative z-10 flex h-full w-full items-center justify-center">
             <span className="flex flex-col items-center justify-center gap-1">
               <span
@@ -103,7 +109,6 @@ export default function SideMenu({ topClass = "top-24" }: SideMenuProps) {
         </button>
       </SheetTrigger>
 
-      {/* Drawer lateral esquerdo */}
       <SheetContent
         side="left"
         className="w-[300px] p-0 transition-transform duration-200 data-[state=closed]:duration-200"
@@ -117,6 +122,7 @@ export default function SideMenu({ topClass = "top-24" }: SideMenuProps) {
             const active = item.exact
               ? pathname === item.to
               : pathname.startsWith(item.to);
+
             return (
               <SheetClose asChild key={item.to}>
                 <Link
@@ -142,7 +148,6 @@ export default function SideMenu({ topClass = "top-24" }: SideMenuProps) {
               type="button"
               className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm hover:bg-red-50 text-red-700"
               onClick={() => {
-                // logout opcional
               }}
             >
               <LogOut className="h-4 w-4" />

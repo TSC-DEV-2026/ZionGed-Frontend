@@ -11,6 +11,9 @@ import { ProtectedRoute } from "./lib/ProtectedRoute";
 import LoadingScreen from "@/components/LoadingScreen";
 import DocumentEditPage from "@/pages/Docs/EditDocument";
 import DocumentCreatePage from "@/pages/Docs/CreateDocument";
+import ListRules from "@/pages/Rules/ListRules";
+import CreateRule from "@/pages/Rules/CreateRule";
+import EditRule from "@/pages/Rules/EditRule";
 import { Toaster } from "sonner";
 
 function RootRoute() {
@@ -47,6 +50,9 @@ function App() {
               element={<DocumentEditPage />}
             />
             <Route path="/documents/create" element={<DocumentCreatePage />} />
+            <Route path="/rules" element={<ListRules />} />
+            <Route path="/rules/create" element={<CreateRule />} />
+            <Route path="/rules/:id/edit" element={<EditRule />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
