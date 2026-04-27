@@ -29,6 +29,7 @@ export interface DocumentRecord {
 }
 
 export type SearchFilters = {
+  user_id?: number | null;
   cliente_id?: number | null;
   tag_chave?: string | null;
   tag_valor?: string | null;
@@ -41,7 +42,6 @@ type SearchInputProps = {
 };
 
 const FREE_SEARCH_KEY = "__free_search__";
-
 
 function normalizeTagsResponse(data: unknown): string[] {
   if (Array.isArray(data)) {
@@ -95,9 +95,7 @@ function formatTagLabel(tag: string) {
     .map((word) => {
       const lower = word.toLowerCase();
 
-      if (acronyms.has(lower)) {
-        return lower.toUpperCase();
-      }
+      if (acronyms.has(lower)) return lower.toUpperCase();
 
       return lower.charAt(0).toUpperCase() + lower.slice(1);
     })
@@ -115,7 +113,6 @@ export default function SearchInput({
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-
   useEffect(() => {
     const fetchTags = async () => {
       try {
@@ -126,8 +123,6 @@ export default function SearchInput({
         const tags = normalizeTagsResponse(res.data);
 
         setTagOptions(tags);
-
-        // Sempre iniciar em busca livre
         setSelectedTag(FREE_SEARCH_KEY);
       } catch (err) {
         console.error("Erro ao carregar tags", err);
@@ -161,9 +156,7 @@ export default function SearchInput({
 
     try {
       if (selectedTag === FREE_SEARCH_KEY) {
-        await onSearch?.({
-          q: value,
-        });
+        await onSearch?.({ q: value });
         return;
       }
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Header from "@/components/header";
 import ImagePasta from "@/assets/Rectangle 8.jpg";
@@ -62,7 +62,7 @@ export default function Home() {
     null
   );
 
-  const [filters, setFilters] = useState<SearchFilters | null>(null);
+  const [filters, setFilters] = useState<SearchFilters>({});
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -78,24 +78,17 @@ export default function Home() {
   };
 
   const fetchDocuments = useCallback(
-    async (f: SearchFilters, p: number, ps: number) => {
-      if (!pessoaId) {
-        toast.error("Não foi possível identificar o usuário.");
-        setResults([]);
-        setMeta(null);
-        return;
-      }
-
+    async (f: SearchFilters = {}, p: number = 1, ps: number = 10) => {
       setIsSearching(true);
 
       try {
-        const params: Record<string, any> = {
+        const params: Record<string, unknown> = {
           page: p,
           page_size: ps,
-          cliente_id: pessoaId,
-          user_id: pessoaId,
         };
 
+        if (f.user_id) params.user_id = f.user_id;
+        if (f.cliente_id) params.cliente_id = f.cliente_id;
         if (f.q) params.q = f.q;
         if (f.tag_chave) params.tag_chave = f.tag_chave;
         if (f.tag_valor) params.tag_valor = f.tag_valor;
@@ -107,7 +100,7 @@ export default function Home() {
         setResults(res.data.items ?? []);
         setMeta(res.data.meta ?? null);
         setFilters(f);
-        setPage(res.data.meta?.page ?? 1);
+        setPage(res.data.meta?.page ?? p);
         setPageSize(res.data.meta?.page_size ?? ps);
       } catch (err) {
         console.error("Erro ao buscar documentos", err);
@@ -118,8 +111,20 @@ export default function Home() {
         setIsSearching(false);
       }
     },
-    [pessoaId]
+    []
   );
+
+  useEffect(() => {
+    if (!pessoaId) return;
+
+    fetchDocuments(
+      {
+        user_id: pessoaId,
+      },
+      1,
+      pageSize
+    );
+  }, [pessoaId, fetchDocuments, pageSize]);
 
   const handleSearch = useCallback(
     async (f: SearchFilters) => {
@@ -130,9 +135,11 @@ export default function Home() {
 
   const goToPage = useCallback(
     async (p: number) => {
-      if (!filters || !meta) return;
+      if (!meta) return;
+
       const total = meta.total_pages || 1;
       const safe = clamp(p, 1, total);
+
       await fetchDocuments(filters, safe, pageSize);
     },
     [fetchDocuments, filters, meta, pageSize]
@@ -141,7 +148,6 @@ export default function Home() {
   const changePageSize = useCallback(
     async (ps: number) => {
       setPageSize(ps);
-      if (!filters) return;
       await fetchDocuments(filters, 1, ps);
     },
     [fetchDocuments, filters]
@@ -158,11 +164,14 @@ export default function Home() {
       const blob = res.data as Blob;
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
+
       a.href = url;
       a.download = doc.filename ?? "documento.pdf";
+
       document.body.appendChild(a);
       a.click();
       a.remove();
+
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Erro ao baixar documento", err);
@@ -190,7 +199,7 @@ export default function Home() {
   const handleDelete = (doc: DocumentRecord) => {
     const created = formatDate(doc.criado_em);
 
-    toast(`Deseja realmente excluir este documento?`, {
+    toast("Deseja realmente excluir este documento?", {
       description: `${doc.filename || "Documento"} criado em ${created}.`,
       action: {
         label: "Excluir",
@@ -206,10 +215,12 @@ export default function Home() {
   };
 
   const totalPages = meta?.total_pages ?? 0;
+
   const pageList = useMemo(
     () => buildPageList(page, totalPages),
     [page, totalPages]
   );
+
   const showPagination = Boolean(meta && meta.total_pages > 1);
 
   return (
@@ -245,8 +256,7 @@ export default function Home() {
 
           {!isSearching && results.length === 0 && (
             <p className="mb-4 text-sm text-slate-500">
-              Nenhum documento encontrado. Informe um valor e clique em
-              &quot;Pesquisar&quot;.
+              Nenhum documento encontrado.
             </p>
           )}
 
@@ -255,7 +265,7 @@ export default function Home() {
               <div className="px-6 py-4 border-b text-sm text-slate-700">
                 {meta ? (
                   <>
-                    Foram encontrados <b>{meta.total_items}</b>
+                    Foram encontrados <b>{meta.total_items}</b> documentos.
                   </>
                 ) : (
                   <>Foram encontrados {results.length} documentos.</>
@@ -277,6 +287,7 @@ export default function Home() {
                       </th>
                     </tr>
                   </thead>
+
                   <tbody>
                     {results.map((doc) => {
                       const isThisDownloading = downloadingId === doc.id;
@@ -287,9 +298,11 @@ export default function Home() {
                           className="border-t hover:bg-slate-50/60"
                         >
                           <td className="px-6 py-3">{doc.filename || "—"}</td>
+
                           <td className="px-6 py-3">
                             {formatDate(doc.criado_em)}
                           </td>
+
                           <td className="px-6 py-3 text-right">
                             <div className="flex justify-end gap-2">
                               <button
